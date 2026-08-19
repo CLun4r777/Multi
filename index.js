@@ -1,7 +1,3 @@
-const { parentPort, workerData } = require('worker_threads');
-const { normalizeProxyUrl, createFallbackStatusResponse } = require('./proxy-utils');
-const { resolveTankName } = require('./tank-utils');
-const { getBuildForTarget } = require('./build-utils');
 (async () => {
   const { WebSocket } = await import('ws');
   const { HttpsProxyAgent } = await import('https-proxy-agent');
@@ -10,7 +6,6 @@ const { getBuildForTarget } = require('./build-utils');
   //const fs = await import('fs');
   const fetchModule = await import('node-fetch');
   const realFetch = fetchModule.default || fetchModule;
-  const { normalizeMainTickMs } = await import('./resource-utils.js');
 
   // ===== CHECK FOR COMMAND LINE ARGUMENTS =====
   const args = process.argv.slice(2);
@@ -28,105 +23,17 @@ const { getBuildForTarget } = require('./build-utils');
   // --- WORKER PROCESS (Bot logic) ---
   let isPaused = false;
   let currentBotInterface = {};
-  let devastate = () => { };
-  let target = {
-    tank: 'basic',
-    followMouse: true,
-    feed: false,
-    override: false,
-    shift: false,
-    mouseDown: false,
-    rMouseDown: false,
-    autofire: false,
-    autospin: false,
-    manualMode: false,
-    coordinateMode: false,
-    manualX: 0,
-    manualY: 0,
-    assignedX: NaN,
-    assignedY: NaN,
-    chatSpam: ""
-  };
-  let lastChatAt = 0;
-
-  let lastAutofire = false;
-  let lastAutospin = false;
-  let lastOverride = false;
-  let manualTargetReached = false;
-  let botId = null;
-  let useSharedManual = true;
-  const sharedStateArray = workerData && workerData.sharedState ? new Float32Array(workerData.sharedState) : null;
-  let MAIN_TICK_MS = 140;
-
-  const readSharedState = () => {
-    if (!sharedStateArray) return;
-    const sharedX = sharedStateArray[0];
-    const sharedY = sharedStateArray[1];
-    const prevTargetX = target.x;
-    const prevTargetY = target.y;
-    const prevMouseX = target.mouseX;
-    const prevMouseY = target.mouseY;
-    const prevFollowMouse = target.followMouse;
-    const prevManualMode = target.manualMode;
-    const prevManualX = target.manualX;
-    const prevManualY = target.manualY;
-    const prevAssignedX = target.assignedX;
-    const prevAssignedY = target.assignedY;
-
-    target.x = Number.isFinite(sharedX) ? sharedX : null;
-    target.y = Number.isFinite(sharedY) ? sharedY : null;
-    target.mouseX = sharedStateArray[2];
-    target.mouseY = sharedStateArray[3];
-    target.mouseDown = !!sharedStateArray[4];
-    target.rMouseDown = !!sharedStateArray[5];
-    target.followMouse = !!sharedStateArray[6];
-    target.feed = !!sharedStateArray[7];
-    target.shift = !!sharedStateArray[8];
-    target.autofire = !!sharedStateArray[9];
-    target.autospin = !!sharedStateArray[10];
-    const coordinateMode = !!sharedStateArray[11];
-    target.manualMode = coordinateMode;
-    target.manualX = sharedStateArray[12];
-    target.manualY = sharedStateArray[13];
-    if (botId !== null && botId >= 0) {
-      const assignedBaseIndex = 16 + botId * 2;
-      const assignedX = sharedStateArray[assignedBaseIndex];
-      const assignedY = sharedStateArray[assignedBaseIndex + 1];
-      target.assignedX = Number.isFinite(assignedX) ? assignedX : NaN;
-      target.assignedY = Number.isFinite(assignedY) ? assignedY : NaN;
-    } else {
-      target.assignedX = NaN;
-      target.assignedY = NaN;
-    }
-    const batchMask = target.batchId === 'swarm2' ? sharedStateArray[15] : sharedStateArray[14];
-    target.autofire = !!(batchMask & (1 << 0));
-    target.autospin = !!(batchMask & (1 << 1));
-    target.followMouse = !!(batchMask & (1 << 2));
-    target.feed = !!(batchMask & (1 << 3));
-    target.override = !!(batchMask & (1 << 4));
-    target.manualMode = !!(batchMask & (1 << 5));
-    target.holdPosition = !!(batchMask & (1 << 6));
-
-    const baseCoordsChanged = target.x !== prevTargetX || target.y !== prevTargetY;
-    const mouseMoved = target.mouseX !== prevMouseX || target.mouseY !== prevMouseY;
-    const followModeChanged = target.followMouse !== prevFollowMouse;
-    const manualCoordsChanged = coordinateMode && (!prevManualMode || target.manualX !== prevManualX || target.manualY !== prevManualY);
-    const assignedCoordsChanged = Number.isFinite(target.assignedX) && Number.isFinite(target.assignedY) && (target.assignedX !== prevAssignedX || target.assignedY !== prevAssignedY);
-
-    if (baseCoordsChanged || mouseMoved || followModeChanged || manualCoordsChanged || assignedCoordsChanged) {
-      manualTargetReached = false;
-    }
-  };
+  let devastate = () => {};
+  let target = {};
 
   //const names = fs.readFileSync("names.txt").toString().split("\n");
 
   const builds = {
-    basic: "2/2/6/8/6/7/7/4",
-    triangle: "1/1/3/7/6/7/9/6",
-    smasher: "12/12/0/0/0/0/3/12/2/1",
-    auto: "0/0/7/8/6/8/9/4"
+    basic: "0/4/6/7/7/7/7/4",
+    triangle: "0/2/3/7/7/7/7/7",
+    smasher: "9/12/0/0/0/0/0/12/3/6"
   };
-
+  
   const upgrade_map = {
     1: 50,
     2: 90,
@@ -141,13 +48,9 @@ const { getBuildForTarget } = require('./build-utils');
     },
 
     // OTHER
-    pursuer_ram: {
+    pursuer: {
       path: "uyiy",
-      build: "9/9/0/0/0/0/0/9/0/9"
-    },
-    pursuer_normal: {
-      path: "uyiy",
-      build: "2/1/7/8/6/7/3/7/1"
+      build: "8/9/0/0/0/0/0/9/8/8"
     },
     anni: {
       path: "kyu",
@@ -167,7 +70,7 @@ const { getBuildForTarget } = require('./build-utils');
     },
     octo: {
       path: "hyyc",
-      build: "3/3/0/7/8/7/9/3/1/1"
+      build: builds.basic
     },
     autogunner: {
       path: "iiy",
@@ -236,57 +139,7 @@ const { getBuildForTarget } = require('./build-utils');
       build: builds.basic
     },
 
-    // FOR CRASH Normal
-    septatrapper_cr: {
-      path: "hji",
-      build: "9/9/0/0/0/0/9"
-    },
-    underseer_cr: {
-      path: "ji",
-      build: "9/9/0/0/0/0/9"
-    },
-    architect_cr: {
-      path: "kuk",
-      build: "9/9/0/0/0/0/9"
-    },
-    hexatrapper_cr: {
-      path: "hyi",
-      build: "9/9/0/0/0/0/9"
-    },
-    octo_cr: {
-      path: "hyyc",
-      build: "9/9/0/0/0/0/9"
-    },
-    cyclone_cr: {
-      path: "hyuc",
-      build: "9/9/0/0/0/0/9"
-    },
-    penta_cr: {
-      path: "yuy",
-      build: "9/9/0/0/0/0/9"
-    },
-    machinegunner_cr: {
-      path: "iih",
-      build: "9/9/0/0/0/0/9"
-    },
-    overseer_cr: {
-      path: "jy",
-      build: "9/9/0/0/0/0/9"
-    },
-    overlord_cr: {
-      path: "jyy",
-      build: "9/9/0/0/0/0/9"
-    },
-    overdrive_cr: {
-      path: "jyhh",
-      build: "9/9/0/0/0/0/9"
-    },
-    bentdouble_cr: {
-      path: "yyh",
-      build: "9/9/0/0/0/0/9"
-    },
-
-    // FOR CRASH AR
+    // FOR CRASH
     whirlwind: {
       path: "chyuk",
       build: "9/9/0/0/0/0/9"
@@ -315,22 +168,6 @@ const { getBuildForTarget } = require('./build-utils');
       path: ["h", "j", "y", [3, 3]],
       build: "9/9/0/0/0/0/9"
     },
-    lorry_cr: {
-      path: "ihyy",
-      build: "9/9/0/0/0/0/9"
-    },
-    crack_cr: {
-      path: "yuyj",
-      build: "9/9/0/0/0/0/9"
-    },
-    nona_cr: {
-      path: "hjiy",
-      build: "9/9/0/0/0/0/9"
-    },
-    manufacture_cr: {
-      path: "jukj",
-      build: "9/9/0/0/0/0/9"
-    },
 
     // SMASHERS
     megasmasher: {
@@ -341,7 +178,7 @@ const { getBuildForTarget } = require('./build-utils');
       path: ["r", [3, 3], "u"],
       build: builds.smasher
     },
-    autosmasher: {
+    autoshasher: {
       path: ["r", [3, 3], "i"],
       build: builds.smasher
     },
@@ -379,9 +216,9 @@ const { getBuildForTarget } = require('./build-utils');
       path: [[2, 3], "j", "j"],
       build: "8/10/12/0/0/0/0/12"
     },
-    physician: {
+    phys: {
       path: [[2, 3], [3, 3]],
-      build: "0/12/0/0/0/0/12/12/3/3"
+      build: builds.smasher
     },
 
     // DPS
@@ -399,7 +236,7 @@ const { getBuildForTarget } = require('./build-utils');
     },
     lorry: {
       path: "ihyy",
-      build: "3/3/0/7/8/7/9/3/1/1"
+      build: builds.basic
     },
 
     // BUILDERS
@@ -419,36 +256,36 @@ const { getBuildForTarget } = require('./build-utils');
     // AUTO
     auto5: {
       path: "hiy",
-      build: builds.auto
+      build: builds.basic
     },
     mega3: {
       path: "hiu",
-      build: builds.auto
+      build: builds.basic
     },
     auto6: {
       path: "hiiy",
-      build: builds.auto
+      build: builds.basic
     },
 
     auto7: {
       path: "hiyy",
-      build: builds.auto
+      build: builds.basic
     },
     mega5: {
       path: "hiyu",
-      build: builds.auto
+      build: builds.basic
     },
     autoauto4: {
       path: "hiii",
-      build: builds.auto
+      build: builds.basic
     },
     hurler3: {
       path: "hiui",
-      build: builds.auto
+      build: builds.basic
     },
     batter4: {
       path: "hiiu",
-      build: builds.auto
+      build: builds.basic
     },
 
     // LAUNCHERS
@@ -557,7 +394,7 @@ const { getBuildForTarget } = require('./build-utils');
       build: builds.basic
     },
     autooverdrive: {
-      path: "jyhj",
+      path: "jyhh",
       build: builds.basic
     },
     headman: {
@@ -740,265 +577,15 @@ const { getBuildForTarget } = require('./build-utils');
     griffin: {
       path: "kkh",
       build: builds.triangle
-    },
-
-    // BASIC & TREE TANKS
-    twin: {
-      path: "y",
-      build: builds.basic
-    },
-    doubletwin: {
-      path: "yy",
-      build: builds.basic
-    },
-    tripleshot: {
-      path: "yu",
-      build: builds.basic
-    },
-    sniper: {
-      path: "u",
-      build: builds.basic
-    },
-    machinegun: {
-      path: "i",
-      build: builds.basic
-    },
-    sprayer: {
-      path: "ih",
-      build: builds.basic
-    },
-    redistributor: {
-      path: "ihy",
-      build: builds.basic
-    },
-    flankguard: {
-      path: "h",
-      build: builds.basic
-    },
-    hexatank: {
-      path: "hy",
-      build: builds.basic
-    },
-    octotank: {
-      path: "hyy",
-      build: "3/3/0/7/8/7/9/3/1/1"
-    },
-    hexatrapper: {
-      path: "hyi",
-      build: builds.basic
-    },
-    triangle: {
-      path: "hu",
-      build: builds.basic
-    },
-    booster: {
-      path: "huu",
-      build: builds.triangle
-    },
-    falcon: {
-      path: "hui",
-      build: builds.triangle
-    },
-    auto3: {
-      path: "hui",
-      build: builds.basic
-    },
-    auto4: {
-      path: "huii",
-      build: builds.basic
-    },
-    banshee: {
-      path: "huih",
-      build: builds.basic
-    },
-    trapguard: {
-      path: "hh",
-      build: builds.basic
-    },
-    buchwhacker: {
-      path: "hhy",
-      build: builds.basic
-    },
-    gunnertrapper: {
-      path: "hhu",
-      build: builds.basic
-    },
-    conqueror: {
-      path: "hhj",
-      build: builds.basic
-    },
-    bulwark: {
-      path: "hhk",
-      build: builds.basic
-    },
-    parapet: {
-      path: "hhjy",
-      build: "3/3/0/7/8/7/8/5/1/0"
-    },
-    tritrapper: {
-      path: "hj",
-      build: builds.basic
-    },
-    fortress: {
-      path: "hjy",
-      build: builds.basic
-    },
-    septatrapper: {
-      path: "hji",
-      build: builds.basic
-    },
-    tripletwin: {
-      path: "hk",
-      build: builds.basic
-    },
-    director: {
-      path: "j",
-      build: builds.basic
-    },
-    pounder: {
-      path: "k",
-      build: builds.basic
-    },
-    automingler: {
-      path: "hykj",
-      build: "2/3/2/7/8/7/9/3/1/0"
-    },
-    mingler: {
-      path: "hyk",
-      build: builds.basic
-    },
-    underseer: {
-      path: "ji",
-      build: builds.basic
-    },
-    rocketeer: {
-      path: "khk",
-      build: builds.basic
-    },
-    destroyer: {
-      path: "ky",
-      build: builds.basic
-    },
-    launcher: {
-      path: "kh",
-      build: builds.basic
-    },
-    gale: {
-      path: "hyyi",
-      build: "3/3/0/7/8/7/9/3/1/1"
-    },
-
-    gunner: {
-      path: "ii",
-      build: builds.basic
-    },
-    nailgun: {
-      path: "iiu",
-      build: builds.basic
-    },
-    pincer: {
-      path: "iiuk",
-      build: builds.basic
-    },
-    finger: {
-      path: "uky",
-      build: builds.basic
-    },
-    nona: {
-      path: "hjiy",
-      build: builds.basic
-    },
-    septamachine: {
-      path: "hjiu",
-      build: builds.basic
-    },
-    assassin: {
-      path: "uy",
-      build: builds.basic
-    },
-    stalker: {
-      path: "uyi",
-      build: builds.basic
-    },
-    healer: {
-      path: "x",
-      build: builds.basic
-    },
-    physician: {
-      path: [[2, 3], [3, 3]],
-      build: "0/12/0/0/0/0/12/12/3/3"
-    },
-
-    overseer: {
-      path: "jy",
-      build: builds.basic
-    },
-    cruiser: {
-      path: "ju",
-      build: builds.basic
-    },
-    spawner: {
-      path: "jh",
-      build: builds.basic
-    },
-    directordrive: {
-      path: "jj",
-      build: builds.basic
-    },
-    honcho: {
-      path: "jk",
-      build: builds.basic
-    },
-    manager: {
-      path: "jx",
-      build: builds.basic
-    },
-    foundry: {
-      path: "jh",
-      build: builds.basic
-    },
-    topbanana: {
-      path: "jh",
-      build: builds.basic
-    },
-    shopper: {
-      path: "jh k",
-      build: builds.basic
-    },
-    megaspawner: {
-      path: "jhi",
-      build: builds.basic
-    },
-    ultraspawner: {
-      path: "jhiy",
-      build: builds.basic
-    },
-    chemist: {
-      path: [[2, 3], [1, 2], [1, 2]],
-      build: "3/3/0/7/8/7/9/3/1/1"
-    },
-    jerker: {
-      path: [[2, 1], [3, 1], [2, 3], [3, 3]],
-      build: builds.smasher
-    },
-    limpet: {
-      path: [[2, 3], [1, 2], [1, 1]],
-      build: builds.smasher
     }
   };
 
   const options = { start: () => { } };
-  let preloadedGameScript = null; // For server-provided script caching
 
   WebAssembly.instantiateStreaming = false
-  let arras; // Make arras lazy - initialized after receiving start message
-  
-  const initializeArras = function () {
-    if (arras) return; // Already initialized
-    arras = (function () {
-    const debug = false
+  const arras = (function () {
     const log = function () {
-      // Intentionally silent to reduce terminal I/O and resource usage.
+      global.console.log(`[headless]`, ...arguments)
     }
 
     let app = false
@@ -1071,22 +658,13 @@ const { getBuildForTarget } = require('./build-utils');
       }
     }
 
-    // Prefer the fixed older build (white-screen fix). server.js already injects the local fixed WASM.
-    if (!global.__sharedWasm) {
-      realFetch('https://raw.githubusercontent.com/P-R-2000/arras-fix/refs/heads/main/app.wasm')
-        .then(x => x.arrayBuffer())
-        .then(x => {
-          app = x;
-          onPrerequisiteLoaded();
-        })
-        .catch(err => {
-          console.log('[headless] FATAL: could not load fixed app.wasm', err);
-        });
-    } else {
-      // Server already gave us the compiled fixed WASM (from local app.wasm)
-      app = true;
-      onPrerequisiteLoaded();
-    }
+    realFetch('https://arras.io/app.wasm').then(x => {
+      x.arrayBuffer().then(x => {
+        app = x;
+        //log('Prerequisite 1/2: app.wasm loaded.');
+        onPrerequisiteLoaded();
+      })
+    });
 
     const loadScript = function () {
       const activateBot = (scriptContent) => {
@@ -1096,52 +674,37 @@ const { getBuildForTarget } = require('./build-utils');
       };
 
       const extractScriptFromHtml = (html) => {
-        // Robust extraction for both classic client and pure-WASM white-screen-fix glue
-        let scriptTagStart = html.indexOf('<script>');
+        const scriptTagStart = html.indexOf('<script>');
         if (scriptTagStart === -1) {
-          scriptTagStart = html.search(/<script[\s>]/i);
-        }
-        if (scriptTagStart === -1) {
-          console.log('[headless] Error: Could not find <script> tag');
+          log('Error: Could not find <script> tag in content.');
           return null;
         }
-        const afterOpen = html.indexOf('>', scriptTagStart);
-        if (afterOpen === -1) return null;
-        let scriptContent = html.slice(afterOpen + 1);
+        let scriptContent = html.slice(scriptTagStart + 8);
         const scriptTagEnd = scriptContent.indexOf('</script');
         if (scriptTagEnd === -1) {
-          console.log('[headless] Error: Could not find closing </script>');
+          log('Error: Could not find closing </script> tag.');
           return null;
         }
-        return scriptContent.slice(0, scriptTagEnd);
+        scriptContent = scriptContent.slice(0, scriptTagEnd);
+        return scriptContent;
       };
 
-      // Prefer the preloaded fixed script that server.js extracted from local index.html
-      if (preloadedGameScript) {
-        activateBot(preloadedGameScript);
-      } else {
-        // Fallback: same fixed older client used by the white-screen userscript
-        realFetch('https://raw.githubusercontent.com/P-R-2000/arras-fix/refs/heads/main/index.html')
-          .then(x => x.text())
-          .then(html => {
-            const extractedScript = extractScriptFromHtml(html);
-            if (extractedScript) {
-              activateBot(extractedScript);
-            } else {
-              console.log('[headless] FATAL: could not extract fixed client script');
-            }
-          })
-          .catch(err => {
-            console.log('[headless] FATAL: could not fetch fixed client', err);
-          });
-      }
+      //log('Fetching from https://arras.io to ensure correct script execution order...');
+      realFetch('https://arras.io').then(x => x.text()).then(html => {
+        const extractedScript = extractScriptFromHtml(html);
+        if (extractedScript) {
+          activateBot(extractedScript);
+        }
+      }).catch(err => {
+        log('FATAL: Could not fetch from arras.io. Please check network or use a valid cache file.', err);
+      });
     }
     loadScript();
 
     let trigger = {};
     const run = function (x, config, oa) {
       const log = function () {
-        // Intentionally silent to reduce terminal I/O and resource usage.
+        global.console.log(`[headless ${config.id}]`, ...arguments)
       }
 
       const internalBotInterface = {
@@ -1187,72 +750,61 @@ const { getBuildForTarget } = require('./build-utils');
           }
         })
       }
-      const elementListeners = new WeakMap();
-      const allElements = [];
-      const handleListener = function (type, f, element) {
-        if (!element) return;
-        if (!elementListeners.has(element)) {
-          elementListeners.set(element, {});
-        }
-        const listeners = elementListeners.get(element);
-        if (!listeners[type]) {
-          listeners[type] = [];
-        }
-        listeners[type].push(f);
+      const handleListener = function (type, f) {
+        listeners[type] = f
       }
-      const broadcastEvent = (type, event) => {
-        const targets = [global.window, global.document, ...allElements];
-        for (const target of targets) {
-          const listeners = elementListeners.get(target);
-          if (listeners && listeners[type]) {
-            for (const f of listeners[type]) {
-              try { f.call(target, event); } catch (e) { }
-            }
-          }
-        }
-      };
-
+      const listeners = {}
       trigger = {
         mousemove: function (clientX, clientY) {
-          broadcastEvent('mousemove', {
-            isTrusted: true,
-            clientX: clientX,
-            clientY: clientY
-          });
+          if (listeners.mousemove) {
+            listeners.mousemove({
+              isTrusted: true,
+              clientX: clientX,
+              clientY: clientY
+            })
+          }
         },
         mousedown: function (clientX, clientY, button) {
-          broadcastEvent('mousedown', {
-            isTrusted: true,
-            clientX: clientX,
-            clientY: clientY,
-            button: button
-          });
+          if (listeners.mousedown) {
+            listeners.mousedown({
+              isTrusted: true,
+              clientX: clientX,
+              clientY: clientY,
+              button: button
+            })
+          }
         },
         mouseup: function (clientX, clientY, button) {
-          broadcastEvent('mouseup', {
-            isTrusted: true,
-            clientX: clientX,
-            clientY: clientY,
-            button: button
-          });
+          if (listeners.mouseup) {
+            listeners.mouseup({
+              isTrusted: true,
+              clientX: clientX,
+              clientY: clientY,
+              button: button
+            })
+          }
         },
         keydown: function (code, repeat) {
-          broadcastEvent('keydown', {
-            isTrusted: true,
-            code: code,
-            key: '',
-            repeat: repeat || false,
-            preventDefault: function () { }
-          });
+          if (listeners.keydown) {
+            listeners.keydown({
+              isTrusted: true,
+              code: code,
+              key: '',
+              repeat: repeat || false,
+              preventDefault: function () { }
+            })
+          }
         },
         keyup: function (code, repeat) {
-          broadcastEvent('keyup', {
-            isTrusted: true,
-            code: code,
-            key: '',
-            repeat: repeat || false,
-            preventDefault: function () { }
-          });
+          if (listeners.keyup) {
+            listeners.keyup({
+              isTrusted: true,
+              code: code,
+              key: '',
+              repeat: repeat || false,
+              preventDefault: function () { }
+            })
+          }
         }
       }
 
@@ -1287,25 +839,10 @@ const { getBuildForTarget } = require('./build-utils');
 
       let inputs = [], setValue = function (str) {
         for (let i = 0, l = inputs.length; i < l; i++) {
-          const input = inputs[i];
-          input.value = str;
-          const listeners = elementListeners.get(input);
-          if (listeners) {
-            const event = { target: input, isTrusted: true };
-            if (listeners.input) {
-              for (const f of listeners.input) {
-                try { f.call(input, event); } catch (e) { }
-              }
-            }
-            if (listeners.change) {
-              for (const f of listeners.change) {
-                try { f.call(input, event); } catch (e) { }
-              }
-            }
-          }
+          inputs[i].value = str
         }
       }
-      let position = [0, 0, 0], died = false, died2 = false, ignore = false, disconnected = false, connected = false, inGame = false, upgrade = false, reconnectCount = 0, isUpgrading = false;
+      let position = [0, 0, 5], died = false, died2 = false, ignore = false, disconnected = false, connected = false, inGame = false, upgrade = false, reconnectCount = 0;
 
       let innerWidth = global.window.innerWidth = 500
       let innerHeight = global.window.innerHeight = 500
@@ -1315,18 +852,13 @@ const { getBuildForTarget } = require('./build-utils');
       const g = function () {
         let w = innerWidth;
         let h = innerHeight;
-        if (canvasRef && canvasRef.width !== undefined) {
-          canvasRef.width = w;
-        }
-        if (canvasRef && canvasRef.height !== undefined) {
-          canvasRef.height = h;
-        }
+        if (!canvasRef.width) canvasRef.width = w;
         if (w * 0.5625 > h) {
           s = 888.888888888 / w;
         } else {
           s = 500 / h;
         }
-        sr = (canvasRef && canvasRef.width !== undefined) ? canvasRef.width / w : 1;
+        sr = canvasRef.width / w;
       };
       g();
 
@@ -1342,13 +874,9 @@ const { getBuildForTarget } = require('./build-utils');
             let a = Array.from(arguments)
             if (this.font === 'bold 7px Ubuntu' && this.fillStyle === 'rgb(255,255,255)') {
               if (a[0] === `You have spawned! Welcome to the game.`) {
-                hasJoined = firstJoin = true;
-                position[0] = position[1] = 0; // Reset internal tracking on spawn
-                position[2] = 0; // No coordinates visible yet
+                hasJoined = firstJoin = true
               } else if (a[0] === 'You have traveled through a portal!') {
-                hasJoined = true;
-                position[0] = position[1] = 0;
-                position[2] = 0;
+                hasJoined = true
               }
               if (!died && (
                 (a[0].startsWith('The server was ') && a[0].endsWith('% active'))
@@ -1453,8 +981,6 @@ const { getBuildForTarget } = require('./build-utils');
           };
 
           if (element.tag === 'canvas') {
-            element.width = innerWidth;
-            element.height = innerHeight;
             element.toDataURL = () => 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUAAAAFCAYAAACNbyblAAAADElEQVQImWNgoBMAAABpAAFEI8ARAAAAAElFTkSuQmCC';
             element.getContext = (type) => {
               if (type === '2d') {
@@ -1468,7 +994,6 @@ const { getBuildForTarget } = require('./build-utils');
           if (element.tag === 'input') {
             inputs.push(element);
           }
-          allElements.push(element);
 
           if (options) {
             Object.assign(element, options);
@@ -1495,7 +1020,7 @@ const { getBuildForTarget } = require('./build-utils');
       }
       let lastHash = global.location.hash
       global.prompt = global.window.prompt = function () {
-        // Intentionally silent to reduce terminal I/O and resource usage.
+        console.log('prompt', ...arguments)
       }
       let devicePixelRatio = global.window.devicePixelRatio = 1
       let a = false
@@ -1521,13 +1046,10 @@ const { getBuildForTarget } = require('./build-utils');
 
       let proxyAgent = null;
       if (config.proxy) {
-        const normalizedProxy = normalizeProxyUrl(config.proxy.url, config.proxy.type);
-        if (normalizedProxy) {
-          if (config.proxy.type === 'socks') {
-            proxyAgent = new SocksProxyAgent(normalizedProxy);
-          } else if (config.proxy.type === 'http') {
-            proxyAgent = new HttpsProxyAgent(normalizedProxy);
-          }
+        if (config.proxy.type === 'socks') {
+          proxyAgent = new SocksProxyAgent(config.proxy.url);
+        } else if (config.proxy.type === 'http') {
+          proxyAgent = new HttpsProxyAgent(config.proxy.url);
         }
       }
 
@@ -1540,34 +1062,27 @@ const { getBuildForTarget } = require('./build-utils');
         mouseUp: function (button) {
           trigger.mouseup(controller.x, controller.y, button)
         },
-        click: async function (x, y) {
-          trigger.mousedown(x, y, 0);
-          await new Promise(r => setTimeout(r, 50)); // Tiny delay for click registration
-          trigger.mouseup(x, y, 0);
+        click: function (x, y) {
+          trigger.mousedown(x, y, 0)
+          trigger.mouseup(x, y, 0)
         },
         press: function (code) {
           trigger.keydown(code)
           trigger.keyup(code)
         },
         chat: function (str) {
-          if (!str) return;
-          // Open chat
-          controller.press('Enter');
-          global.performance.time += 200;
-          if (typeof a === 'function') a();
-
-          // Type message
-          setValue(str);
-          global.performance.time += 200;
-          if (typeof a === 'function') a();
-
-          // Send message
-          controller.press('Enter');
-          global.performance.time += 200;
-          if (typeof a === 'function') a();
-
-          // Clear input buffer
-          setValue("");
+          controller.press('Enter')
+          global.performance.time += 90
+          a()
+          controller.press('Enter')
+          global.performance.time += 90
+          a()
+          setValue(str)
+          controller.press('Enter')
+          global.performance.time += 90
+          a()
+          setValue(str)
+          controller.press('Enter')
         },
         moveDirection: function (x, y) {
           trigger[x < 0 ? 'keydown' : 'keyup']('KeyA')
@@ -1598,21 +1113,21 @@ const { getBuildForTarget } = require('./build-utils');
       }, block = false
 
       async function waitTime(timeout) {
-        await new Promise(resolve => setTimeout(resolve, timeout));
+          await new Promise(resolve => setTimeout(resolve, timeout));
       }
 
 
       // PATH FIND FUNC
       function getDir(x1, y1, x2, y2) {
-        return Math.atan2(y2 - y1, x2 - x1);
+          return Math.atan2(y2 - y1, x2 - x1);
       }
 
       function randint(a, b) {
-        return Math.floor(Math.random() * (b - a + 1)) + a;
+          return Math.floor(Math.random() * (b - a + 1)) + a;
       }
 
       function choice(array) {
-        return array[randint(0, array.length - 1)];
+          return array[randint(0, array.length-1)];
       }
 
       function stopMoving() {
@@ -1627,35 +1142,35 @@ const { getBuildForTarget } = require('./build-utils');
 
         // Perfect 8-direction movement
         if (angle >= -Math.PI / 8 && angle < Math.PI / 8) {
-          // Right
-          hold["KeyD"] = true;
+            // Right
+            hold["KeyD"] = true;
         } else if (angle >= Math.PI / 8 && angle < 3 * Math.PI / 8) {
-          // Down-Right
-          hold["KeyS"] = true;
-          hold["KeyD"] = true;
+            // Down-Right
+            hold["KeyS"] = true;
+            hold["KeyD"] = true;
         } else if (angle >= 3 * Math.PI / 8 && angle < 5 * Math.PI / 8) {
-          // Down
-          hold["KeyS"] = true;
+            // Down
+            hold["KeyS"] = true;
         } else if (angle >= 5 * Math.PI / 8 && angle < 7 * Math.PI / 8) {
-          // Down-Left
-          hold["KeyS"] = true;
-          hold["KeyA"] = true;
+            // Down-Left
+            hold["KeyS"] = true;
+            hold["KeyA"] = true;
         } else if (angle >= 7 * Math.PI / 8 || angle < -7 * Math.PI / 8) {
-          // Left
-          hold["KeyA"] = true;
+            // Left
+            hold["KeyA"] = true;
         } else if (angle >= -7 * Math.PI / 8 && angle < -5 * Math.PI / 8) {
-          // Up-Left
-          hold["KeyW"] = true;
-          hold["KeyA"] = true;
+            // Up-Left
+            hold["KeyW"] = true;
+            hold["KeyA"] = true;
         } else if (angle >= -5 * Math.PI / 8 && angle < -3 * Math.PI / 8) {
-          // Up
-          hold["KeyW"] = true;
+            // Up
+            hold["KeyW"] = true;
         } else {
-          // Up-Right
-          hold["KeyW"] = true;
-          hold["KeyD"] = true;
+            // Up-Right
+            hold["KeyW"] = true;
+            hold["KeyD"] = true;
         }
-
+        
         for (let key of "WASD") {
           key = "Key" + key;
           trigger[hold[key] ? "keydown" : "keyup"](key);
@@ -1663,46 +1178,33 @@ const { getBuildForTarget } = require('./build-utils');
       }
 
       async function onJoin() {
-        if (isUpgrading) return;
-        isUpgrading = true;
-        block = true; // Lock movement during upgrade
-        died2 = false; // Prevent fillText from setting hasJoined = true while upgrading
-
-        // Force coordinates ON immediately so we aren't blind
-        controller.press('KeyL');
-        position[2] = 5;
-
         reconnectCount = 0;
-        if (config.id === 0) log(`[Bot 0] Joining as: ${target.tank}`);
-        if (tanks[target.tank]) {
-          log(`[Bot ${config.id}] Selected tank ${target.tank} with build ${tanks[target.tank].build}`);
-        }
 
+        let waited;
         for (const key of tanks[target.tank].path) {
           if (key === "wait") {
             await waitTime(1000);
           } else if (key instanceof Array) {
             await waitTime(500);
-            await controller.click(upgrade_map[key[0]], upgrade_map[key[1]]);
+            controller.click(upgrade_map[key[0]], upgrade_map[key[1]]);
             await waitTime(500);
           } else {
             controller.press("Key" + key.toUpperCase());
           }
         }
 
-        const buildValues = getBuildForTarget(target, tanks);
         let build;
         if (target.feed) {
-          build = buildValues;
+          build = [0, 0, 12, 0, 0, 0, 0, 8]
           controller.press("KeyR");
         } else {
-          build = buildValues;
+          build = tanks[target.tank].build.split("/");
         }
 
         let i2 = 0;
         for (let i = 1; i <= build.length; i++) {
           const stat = parseInt(build[i2]);
-
+          
           if (i == 10) {
             i = 0;
           }
@@ -1722,27 +1224,14 @@ const { getBuildForTarget } = require('./build-utils');
         }
 
         inGame = true
-
-        if (target.autofire) {
-          controller.press("KeyE");
-        }
-        lastAutofire = target.autofire;
-
-        if (target.autospin) {
-          controller.press("KeyC");
-        }
-        lastAutospin = target.autospin;
-
-        block = false; // Unlock movement
-        isUpgrading = false;
-        hasJoined = false; // Clear any queued spawn triggers
+        died2 = false
       }
 
       const mainInterval = setInterval(function () {
         if (block || isPaused) {
           return
         }
-        readSharedState();
+
         if (a) {
           switch (i) {
             case 1: {
@@ -1763,8 +1252,6 @@ const { getBuildForTarget } = require('./build-utils');
             delete timeouts[i]
             for (let i = 0, l = at.length; i < l; i++) {
               at[i]()
-
-
             }
           }
           position[2]--
@@ -1773,21 +1260,9 @@ const { getBuildForTarget } = require('./build-utils');
           }
           if (hasJoined) {
             hasJoined = false;
-
-            if (isUpgrading) return;
-
-            firstJoin = false;
-
-            // Ensure target.tank is valid
-            target.tank = resolveTankName(target.tank, tanks, 'basic');
-            if (!tanks[target.tank]) {
-              target.tank = 'basic';
-            }
-
-            // If the tank uses coordinate clicks, delay slightly to ensure UI is ready
-            const path = tanks[target.tank].path;
-            if (Array.isArray(path) && path.some(key => Array.isArray(key))) {
-              setTimeout(onJoin, 1200);
+            fisrtJoin = false;
+            if (tanks instanceof Array && tanks[target.tank].path.find(key => key instanceof Array)) {
+              setTimeout(onJoin, 500);
             } else {
               onJoin();
             }
@@ -1801,71 +1276,21 @@ const { getBuildForTarget } = require('./build-utils');
             //   controller.chat("#PRAISETHEPRIMORDIALNOOB");
             // }
 
-            let moveTarget = { x: 0, y: 0 };
-            let aimTarget = { x: 0, y: 0 };
-            let valid = false;
-
-            if (target.holdPosition && Number.isFinite(position[0]) && Number.isFinite(position[1])) {
-              moveTarget.x = aimTarget.x = position[0];
-              moveTarget.y = aimTarget.y = position[1];
-              valid = true;
-              stopMoving();
-            } else if (target.manualMode && Number.isFinite(target.manualX) && Number.isFinite(target.manualY)) {
-              moveTarget.x = aimTarget.x = target.manualX;
-              moveTarget.y = aimTarget.y = target.manualY;
-              valid = true;
-            } else if (Number.isFinite(target.assignedX) && Number.isFinite(target.assignedY)) {
-              moveTarget.x = aimTarget.x = target.assignedX;
-              moveTarget.y = aimTarget.y = target.assignedY;
-              valid = true;
-            } else if (Number.isFinite(target.x) && Number.isFinite(target.y)) {
-              // Base targets
-              moveTarget.x = target.x;
-              moveTarget.y = target.y;
-              aimTarget.x = target.x + target.mouseX;
-              aimTarget.y = target.y + target.mouseY;
+            if (target.x) {
+              let t = {
+                x: target.x,
+                y: target.y
+              };
 
               if (target.followMouse) {
-                // If following mouse, movement target matches aiming target
-                moveTarget.x = aimTarget.x;
-                moveTarget.y = aimTarget.y;
+                t.x += target.mouseX;
+                t.y += target.mouseY;
               }
-              valid = true;
-            }
 
-            if (!valid) {
-              stopMoving();
-            } else {
-              if (position[2] > 0) {
-                if (target.holdPosition) {
-                  stopMoving();
-                } else if ((target.manualMode && Number.isFinite(target.manualX) && Number.isFinite(target.manualY)) ||
-                    (Number.isFinite(target.assignedX) && Number.isFinite(target.assignedY))) {
-                  const dx = moveTarget.x - position[0];
-                  const dy = moveTarget.y - position[1];
-                  const distance = Math.hypot(dx, dy);
-                  const stopThreshold = 5;
-                  const resumeThreshold = 8;
-
-                  if (manualTargetReached) {
-                    if (distance > resumeThreshold) {
-                      manualTargetReached = false;
-                      pathfind(moveTarget.x, moveTarget.y);
-                    } else {
-                      stopMoving();
-                    }
-                  } else if (distance <= stopThreshold) {
-                    manualTargetReached = true;
-                    stopMoving();
-                  } else {
-                    pathfind(moveTarget.x, moveTarget.y);
-                  }
-                } else {
-                  pathfind(moveTarget.x, moveTarget.y);
-                }
-              } else {
-                stopMoving(); // Stay still if we can't see our own coordinates
-              }
+              pathfind(
+                t.x,
+                t.y
+              );
 
               let angle;
               if (target.shift) {
@@ -1874,14 +1299,13 @@ const { getBuildForTarget } = require('./build-utils');
                 angle = getDir(
                   position[0],
                   position[1],
-                  aimTarget.x,
-                  aimTarget.y
+                  target.x + target.mouseX,
+                  target.y + target.mouseY
                 );
               }
 
               controller.x = (innerWidth / 2) + Math.cos(angle) * 200;
               controller.y = (innerHeight / 2) + Math.sin(angle) * 200;
-              trigger.mousemove(controller.x, controller.y);
             }
 
             /*if (Math.random() < 0.01) {
@@ -1895,25 +1319,6 @@ const { getBuildForTarget } = require('./build-utils');
 
             controller[target.mouseDown && !target.feed ? "mouseDown" : "mouseUp"]()
             controller[target.rMouseDown && !target.feed ? "mouseDown" : "mouseUp"](2)
-
-            if (target.autofire !== lastAutofire) {
-              controller.press("KeyE");
-              lastAutofire = target.autofire;
-            }
-            if (target.autospin !== lastAutospin) {
-              controller.press("KeyC");
-              lastAutospin = target.autospin;
-            }
-            if (target.override !== lastOverride) {
-              if (target.override) controller.press("KeyR");
-              lastOverride = target.override;
-            }
-
-            // Chat Spam Logic
-            if (target.chatSpam && Date.now() - lastChatAt > 2100) {
-              lastChatAt = Date.now();
-              controller.chat(target.chatSpam);
-            }
           }
           if (died) {
             inGame = false
@@ -1946,19 +1351,14 @@ const { getBuildForTarget } = require('./build-utils');
               devicePixelRatio = global.window.devicePixelRatio = 1
               if (config.autoRespawn) {
                 //log('Render cache cleared, respawning...')
-                died2 = true;
-                const respawnNow = () => {
+                const interv = setInterval(() => {
+                  died2 = true
                   controller.press('Enter')
                   controller.press('Escape')
-                };
-                respawnNow();
-                const interv = setInterval(() => {
                   if (!died2) {
                     clearInterval(interv);
-                    return;
                   }
-                  respawnNow();
-                }, 100);
+                }, 4000);
               } else {
                 //log('Render cache cleared.')
               }
@@ -1977,7 +1377,7 @@ const { getBuildForTarget } = require('./build-utils');
             i++
           }
         }
-      }, MAIN_TICK_MS)
+      }, 100)
       global.localStorage = global.window.localStorage = {
         setItem: function (i, v) {
           this[i] = v
@@ -1992,14 +1392,9 @@ const { getBuildForTarget } = require('./build-utils');
           let url = args[0];
 
           if (url.startsWith('./')) {
-            // Force the white-screen-fix WASM
-            if (url.includes('app.wasm')) {
-              url = args[0] = 'https://raw.githubusercontent.com/P-R-2000/arras-fix/refs/heads/main/app.wasm';
-            } else {
-              url = args[0] = 'https://arras.io' + url.slice(1);
-            }
+            url = args[0] = 'https://arras.io' + url.slice(1)
           } else if (url.startsWith('/')) {
-            url = args[0] = 'https://arras.io' + url;
+            url = args[0] = 'https://arras.io' + url
           }
 
           let options = args[1] || {};
@@ -2008,14 +1403,13 @@ const { getBuildForTarget } = require('./build-utils');
           }
           args[1] = options;
 
-          // Always serve the pre-loaded (fixed) WASM buffer
-          if (url.includes('app.wasm')) { return wasm(); }
+          if (url.includes('app.wasm')) { return wasm() }
 
           if (url.endsWith('/clientCount')) {
             // receiving clientCount instantly to improve network
             return new Promise(resolve => resolve({
               json: async () => {
-                return { "ok": true, "clients": 7777 }
+                return {"ok": true, "clients": 7777}
               }
             }));
           }
@@ -2023,26 +1417,23 @@ const { getBuildForTarget } = require('./build-utils');
           const fetchPromise = Reflect.apply(a, b, args);
 
           if (url.endsWith('/status')) {
-            return fetchPromise.then(async response => {
-              const contentType = response.headers.get('content-type');
-              if (contentType && contentType.includes('application/json')) {
-                // It's JSON, process it and return the original response
-                const cloned = response.clone();
-                cloned.json().then(i => {
-                  if (i.ok && i.status) {
-                    statusRecieved = true;
-                    status = Object.values(i.status);
-                  }
-                }).catch(() => { });
-                return response;
+            fetchPromise.then(response => {
+              return response.clone().json();
+            }).then(i => {
+              if (i.ok && i.status) {
+                statusRecieved = true;
+                status = Object.values(i.status);
+                //log('Status recieved and processed.');
               } else {
-                // Not JSON (probably HTML/404), return a fake JSON response to prevent client crash
-                log(`Warning: /status returned non-JSON content from ${url}. Returning mock JSON.`);
-                return createFallbackStatusResponse();
+                log('Status error.');
               }
             }).catch(err => {
-              log(`Failed to fetch status (${url}):`, err);
-              return createFallbackStatusResponse();
+              log(`Failed to process status JSON (${url}):`, err);
+              return new Promise(resolve => resolve({
+                json: async () => {
+                  return {"ok": false}
+                }
+              }));
             });
           }
 
@@ -2053,19 +1444,7 @@ const { getBuildForTarget } = require('./build-utils');
       global.navigator = global.window.navigator = {}
       let gameSocket = false, host = false
 
-      const WebSocketWrapper = class extends WebSocket {
-        constructor(...args) {
-          if (typeof args[0] === 'string') {
-            const originalUrl = args[0];
-            const idx = originalUrl.indexOf('/?');
-            args[0] = idx !== -1 ? originalUrl.slice(0, idx) : originalUrl;
-            args[0] += '/?a=3&b=8f8d16adff17e2b9&t=' + Math.round(Date.now() / 1000);
-          }
-          super(...args);
-        }
-      }
-
-      global.WebSocket = global.window.WebSocket = new Proxy(WebSocketWrapper, {
+      global.WebSocket = global.window.WebSocket = new Proxy(WebSocket, {
         construct: function (a, b, c) {
           const fullUrl = b[0];
           host = new url.URL(fullUrl).host
@@ -2143,56 +1522,12 @@ const { getBuildForTarget } = require('./build-utils');
       options.start(arras)
     }
     return arras
-    })();
-  };
-  // End of initializeArras function
+  })()
 
 
-  parentPort.on('message', (message) => {
+  process.on('message', (message) => {
     if (message.type === 'start') {
-      // Set the preloaded script before initializing arras
-      if (message.gameScript) {
-        preloadedGameScript = message.gameScript;
-      }
-      
-      // Signal that we have a shared WASM to skip unnecessary fetch
-      if (message.sharedWasm) {
-        global.__sharedWasm = true;
-      }
-      
-      // Now initialize arras with the preloaded resources
-      initializeArras();
-      
       const config = message.config;
-      const sharedWasm = message.sharedWasm; 
-      target.batchId = config && config.batchId ? config.batchId : 'swarm1';
-      botId = Number.isFinite(config && config.id) ? config.id : null;
-      MAIN_TICK_MS = normalizeMainTickMs(Number.isFinite(config && config.mainTickMs) ? config.mainTickMs : 140);
-      target.tank = resolveTankName(config && config.tank, tanks, target.tank || 'basic');
-
-      const originalInstantiate = WebAssembly.instantiate;
-
-      // 1. Override the streaming compiler
-      global.WebAssembly.instantiateStreaming = async function(response, imports) {
-          // Instantiate the shared module (this returns just the Instance)
-          const instance = await originalInstantiate(sharedWasm, imports);
-          
-          // Wrap it in the exact object structure the game engine expects!
-          return { module: sharedWasm, instance: instance };
-      };
-      
-      // 2. Override the standard compiler
-      global.WebAssembly.instantiate = async function(bufferOrModule, imports) {
-          if (bufferOrModule instanceof WebAssembly.Module) {
-              // If it's already a module, standard behavior returns just the instance
-              return await originalInstantiate(bufferOrModule, imports);
-          }
-          
-          // Otherwise, force it to use our shared module and return the wrapped object
-          const instance = await originalInstantiate(sharedWasm, imports);
-          return { module: sharedWasm, instance: instance };
-      };
-
       options.token = config.token;
       options.loadFromCache = config.loadFromCache;
       options.cache = config.cache;
@@ -2210,11 +1545,25 @@ const { getBuildForTarget } = require('./build-utils');
       const key = message.key;
       if (currentBotInterface.log) currentBotInterface.log(`CMD Key: ${key}`);
 
+      // Find trigger functions in scope? No, they are inside run()...
+      // We need 'run' scope to access 'trigger'.
+      // Actually, trigger is not exposed globally. 
+      // Wait, the message listener is currently OUTSIDE 'run'.
+      // We need a way to pass this down.
+      // currentBotInterface is the object returned by arras.create(config).
+      // Does it expose trigger? No.
+
+      // FIX: Reroute this message to the internal listeners if possible.
+      // Or store a global reference to the trigger?
+      // Since we are in the worker context, let's look at where 'run' is called.
+      // 'arras.create(config)' calls 'run(app, config, ...)'
+      // 'run' defines 'trigger' and 'listeners'.
+
+      // We can expose an event handler on currentBotInterface.
       if (currentBotInterface.simulateKey) {
         currentBotInterface.simulateKey(key);
       }
     } else if (message.type == 'position') {
-      useSharedManual = false;
       target.x = message.x;
       target.y = message.y;
 
@@ -2228,40 +1577,12 @@ const { getBuildForTarget } = require('./build-utils');
       target.feed = message.feeding;
 
       target.shift = message.shift;
-
-      target.autofire = message.autofire;
-      target.autospin = message.autospin;
-      target.override = message.override;
-
-      const newManualMode = message.manualMode;
-      const newManualX = message.manualX;
-      const newManualY = message.manualY;
-      if (target.manualMode !== newManualMode || target.manualX !== newManualX || target.manualY !== newManualY) {
-        manualTargetReached = false;
-      }
-      target.manualMode = newManualMode;
-      target.manualX = newManualX;
-      target.manualY = newManualY;
     } else if (message.type == 'tankselect') {
-      target.tank = resolveTankName(message.tank, tanks, target.tank || 'basic');
-    } else if (message.type == 'chat') {
-      target.chatSpam = message.spam ? message.message : "";
-      if (message.message && !message.spam) {
-        if (currentBotInterface && currentBotInterface.controller && typeof currentBotInterface.controller.chat === 'function') {
-          currentBotInterface.controller.chat(message.message);
-        }
-      }
+      target.tank = message.tank;
     } else if (message.type == 'destroy') {
-      console.log("Destroy requested; shutting down worker gracefully.");
-      try {
-        if (typeof devastate === 'function') {
-          devastate();
-        }
-      } catch (err) {
-        console.error('Destroy cleanup failed:', err);
-      }
-      parentPort.postMessage({ type: 'worker-destroyed' });
-      setTimeout(() => process.exit(0), 50);
+      console.log("why devastatee");
+      devastate();
+      process.exit();
     }
   });
 
